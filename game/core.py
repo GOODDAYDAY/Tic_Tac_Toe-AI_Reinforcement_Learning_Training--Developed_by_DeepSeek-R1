@@ -1,51 +1,74 @@
-# 导入模块
+# game/core.py
+"""
+游戏核心逻辑模块
+实现棋盘状态管理和胜负判断
+"""
+
+import logging
+from typing import Optional, Tuple, List
+
 import numpy as np
 
 from game.config import GameConfig
 
+logger = logging.getLogger(__name__)
+
 
 class GameLogic:
-    """游戏逻辑核心类"""
+    """游戏逻辑核心类，管理棋盘状态和游戏规则"""
 
-    def __init__(self, n=3):
+    def __init__(self, n: int = 3):
+        """
+        初始化游戏逻辑
+        :param n: 棋盘尺寸
+        """
+        logger.info(f"Creating game logic for {n}x{n} board")
         self.n = n
+        self.win_condition = GameConfig.get_win_condition(n)
         self.reset()
+        logger.debug(f"Win condition set to {self.win_condition} in a row")
 
-    def reset(self):
-        """重置游戏状态"""
+    def reset(self) -> None:
+        """重置游戏到初始状态"""
+        logger.debug("Resetting game state")
         self.board = np.zeros((self.n, self.n), dtype=int)
         self.current_player = 1
-        self.winner = None
+        self.winner: Optional[int] = None
         self.game_over = False
 
-    def get_valid_moves(self):
-        """获取所有合法移动位置"""
-        return [(i, j) for i in range(self.n) for j in range(self.n) if self.board[i][j] == 0]
+    def make_move(self, row: int, col: int) -> bool:
+        """
+        执行移动操作，包含详细的合法性检查
+        :return: 是否成功执行移动
+        """
+        if not (0 <= row < self.n and 0 <= col < self.n):
+            logger.warning(f"Invalid move position: ({row}, {col})")
+            return False
 
-    def make_move(self, row, col):
-        """执行移动操作"""
-        if self.board[row][col] == 0 and not self.game_over:
-            self.board[row][col] = self.current_player
-            if self.check_win(row, col):
-                self.winner = self.current_player
-                self.game_over = True
-            elif len(self.get_valid_moves()) == 0:
-                self.game_over = True
-            else:
-                self.current_player = -self.current_player
-            return True
-        return False
+        if self.board[row][col] != 0:
+            logger.debug(f"Position occupied: ({row}, {col})")
+            return False
 
-    def check_win(self, row, col):
-        """改进的胜利条件校验"""
+        logger.info(f"Player {self.current_player} moves to ({row}, {col})")
+        self.board[row][col] = self.current_player
+
+        if self._check_win(row, col):
+            self._handle_win()
+        elif self._check_draw():
+            self._handle_draw()
+        else:
+            self._switch_player()
+
+        return True
+
+    def _check_win(self, row: int, col: int) -> bool:
+        """检查当前移动是否导致胜利（私有方法）"""
+        logger.debug(f"Checking win condition for ({row}, {col})")
         player = self.board[row][col]
-        required = GameConfig.get_win_condition(self.n)
-
-        # 动态步长检查
         directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+
         for dx, dy in directions:
             count = 1
-            # 双向检查
             for d in [1, -1]:
                 step = 1
                 while True:
@@ -59,6 +82,35 @@ class GameLogic:
                             break
                     else:
                         break
-            if count >= required:
+            if count >= self.win_condition:
+                logger.info(f"Player {player} wins with {count} in a row")
                 return True
         return False
+
+    def _check_draw(self) -> bool:
+        """检查是否平局（私有方法）"""
+        if np.all(self.board != 0):
+            logger.info("Game ended in a draw")
+            return True
+        return False
+
+    def _handle_win(self) -> None:
+        """处理胜利场景（私有方法）"""
+        self.winner = self.current_player
+        self.game_over = True
+        logger.info(f"Player {self.winner} wins!")
+
+    def _handle_draw(self) -> None:
+        """处理平局场景（私有方法）"""
+        self.winner = None
+        self.game_over = True
+        logger.info("Game ended in a draw")
+
+    def _switch_player(self) -> None:
+        """切换当前玩家（私有方法）"""
+        self.current_player = -self.current_player
+        logger.debug(f"Switched to player {self.current_player}")
+
+    def get_valid_moves(self) -> List[Tuple[int, int]]:
+        """获取所有合法移动位置"""
+        return [(i, j) for i in range(self.n) for j in range(self.n) if self.board[i][j] == 0]

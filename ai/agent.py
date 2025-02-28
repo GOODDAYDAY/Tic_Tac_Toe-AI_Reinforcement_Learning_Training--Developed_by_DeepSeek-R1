@@ -1,4 +1,5 @@
 # 导入模块
+
 import logging
 import os
 import random
@@ -12,9 +13,19 @@ import torch.optim as optim
 from game.config import GameConfig
 from .dqn import DQN
 
+logger = logging.getLogger(__name__)
+
 
 class RLAgent:
-    def __init__(self, n=GameConfig.DEFAULT_BOARD_SIZE, use_gpu=False):
+    """强化学习智能体，实现DQN算法和游戏交互逻辑"""
+
+    def __init__(self, n: int = GameConfig.DEFAULT_BOARD_SIZE, use_gpu: bool = False):
+        """
+        初始化强化学习智能体
+        :param n: 棋盘尺寸
+        :param use_gpu: 是否启用GPU加速
+        """
+        logger.info(f"Initializing RLAgent for {n}x{n} board")
         self.n = n
         self.input_size = n * n
         self.memory = deque(maxlen=10000)
@@ -23,14 +34,29 @@ class RLAgent:
         self.epsilon_min = 0.01
         self.epsilon_decay = 0.995
         self.batch_size = 64
-        self.model_file = f"tictactoe_model_n{n}.pth"
-
+        self.model_file = f"models/tictactoe_model_n{n}.pth"
         self.use_gpu = use_gpu
-        self.model = DQN(self.input_size, use_gpu=use_gpu)
+
+        self._init_model()
+        self._ensure_model_directory()
+
+        logger.debug(f"Device in use: {self.model.device}")
+
+    def _init_model(self) -> None:
+        """初始化神经网络模型"""
+        logger.debug("Building DQN model architecture")
+        self.model = DQN(self.input_size, use_gpu=self.use_gpu)
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
 
         if os.path.exists(self.model_file):
             self.load_model()
+        else:
+            logger.info("No pre-trained model found, initializing new model")
+
+    def _ensure_model_directory(self) -> None:
+        """确保模型保存目录存在"""
+        os.makedirs(os.path.dirname(self.model_file), exist_ok=True)
+        logger.debug(f"Model directory verified: {os.path.dirname(self.model_file)}")
 
     def get_state(self, game):
         """获取游戏状态的扁平化表示"""

@@ -8,41 +8,97 @@ from ai.agent import RLAgent
 from game.config import GameConfig
 from game.core import GameLogic
 
+logger = logging.getLogger(__name__)
+
 
 class GameGUI:
-    def __init__(self, n=GameConfig.DEFAULT_BOARD_SIZE):
+    """井字棋图形界面主类，负责处理用户交互和AI训练流程"""
+
+    def __init__(self, n: int = GameConfig.DEFAULT_BOARD_SIZE):
+        """
+        初始化游戏界面
+        :param n: 棋盘尺寸，默认值为配置中的标准尺寸
+        """
+        logger.info(f"Initializing game GUI with {n}x{n} board")
         self.n = n
         self.cell_size = GameConfig.CELL_SIZE
 
-        self.game = GameLogic(n)
-        self.root = tk.Tk()  # 使用tk别名
-        self.root.title(f"Tic-Tac-Toe {n}x{n}")
+        self.game = self._init_game_logic()
+        self.root = tk.Tk()
+        self.root.title(f"Tic-Tac-Toe {n}x{n} - DeepSeek RL")
 
-        self.ai = RLAgent(n, use_gpu=True)
+        self.ai = self._init_ai_agent()
         self.is_human_turn = True
         self.train_mode = False
 
-        self.create_widgets()
+        self._create_widgets()
         self.update_board()
+        logger.debug("GUI initialization completed")
 
-    def create_widgets(self):
+    def _init_game_logic(self) -> GameLogic:
+        """初始化游戏逻辑核心"""
+        logger.debug("Creating game logic instance")
+        return GameLogic(self.n)
+
+    def _init_ai_agent(self) -> RLAgent:
+        """初始化强化学习智能体"""
+        logger.info("Initializing RL agent with GPU support")
+        return RLAgent(self.n, use_gpu=True)
+
+    def _create_widgets(self) -> None:
         """创建界面组件"""
-        self.canvas = tk.Canvas(  # 显式使用tk.前缀
+        logger.debug("Building UI components")
+
+        # 棋盘画布
+        self.canvas = tk.Canvas(
             self.root,
             width=self.n * self.cell_size,
-            height=self.n * self.cell_size
+            height=self.n * self.cell_size,
+            bg=GameConfig.COLORS['bg']
         )
-        self.canvas.pack()
-        self.canvas.bind("<Button-1>", self.click_handler)
+        self.canvas.pack(pady=20)
+        self.canvas.bind("<Button-1>", self._handle_click)  # 修复事件绑定
 
-        control_frame = tk.Frame(self.root)  # 使用tk.Frame
+        # 控制面板
+        control_frame = tk.Frame(self.root)
         control_frame.pack(pady=10)
 
-        tk.Button(  # 使用tk.Button
-            control_frame,
-            text="New Game",
-            command=self.new_game
-        ).pack(side=tk.LEFT, padx=5)  # 使用tk.LEFT
+        # 功能按钮
+        buttons = [
+            ("New Game", self.new_game),
+            ("Train AI", self.start_training),
+            ("Human vs AI", self.start_human_game)
+        ]
+
+        for text, cmd in buttons:
+            tk.Button(
+                control_frame,
+                text=text,
+                command=cmd,
+                width=15
+            ).pack(side=tk.LEFT, padx=5)
+
+        logger.info("UI components created successfully")
+
+    def _handle_click(self, event) -> None:  # 添加事件处理方法
+        """处理用户点击事件（私有方法）"""
+        logger.debug(f"Processing click at ({event.x}, {event.y})")
+        if not self.is_human_turn or self.game.game_over or self.train_mode:
+            logger.debug("Ignoring click in current state")
+            return
+
+        col = event.x // self.cell_size
+        row = event.y // self.cell_size
+
+        logger.info(f"Processing move at ({row}, {col})")
+        if self.game.make_move(row, col):
+            self.update_board()
+            if not self.game.game_over:
+                self.is_human_turn = False
+                logger.debug("Scheduling AI move")
+                self.root.after(500, self.ai_move)
+        else:
+            logger.warning(f"Invalid move attempted at ({row}, {col})")
 
     def draw_board(self):
         """绘制棋盘"""
@@ -165,6 +221,13 @@ class GameGUI:
         self.is_human_turn = True
         self.update_board()
 
-    def run(self):
+    def run(self) -> None:
         """运行主循环"""
-        self.root.mainloop()
+        logger.info("Starting GUI main loop")
+        try:
+            self.root.mainloop()
+        except KeyboardInterrupt:
+            logger.info("Application closed by user")
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+            raise

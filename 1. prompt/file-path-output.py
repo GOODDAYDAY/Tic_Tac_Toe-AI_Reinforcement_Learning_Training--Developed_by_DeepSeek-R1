@@ -13,7 +13,7 @@ def _list_dir_contents(path, prefix):
     递归列出目录内容，生成树状结构
     """
     try:
-        # 添加过滤条件：排除隐藏文件、__init__.py 和 .pyc 文件
+        # 过滤隐藏文件、__init__.py、.pyc文件
         entries = [entry for entry in os.listdir(path)
                    if (not entry.startswith('.') and
                        entry != '__init__.py' and
@@ -35,11 +35,13 @@ def _list_dir_contents(path, prefix):
         print(f"{prefix}{connector}{entry}", end="")
 
         if os.path.isdir(entry_path):
-            print("/")
-            extension = "    " if is_last else "│   "
-            _list_dir_contents(entry_path, prefix + extension)
+            print("/")  # 目录添加斜杠
+            # 如果是名为"prompt"的目录，不递归展开其内容
+            if entry != "1. prompt":
+                extension = "    " if is_last else "│   "
+                _list_dir_contents(entry_path, prefix + extension)
         else:
-            print()
+            print()  # 文件换行
 
 if __name__ == "__main__":
     current_dir = os.getcwd()

@@ -15,10 +15,7 @@ class GameGUI:
     """井字棋图形界面主类，负责处理用户交互和AI训练流程"""
 
     def __init__(self, n: int = GameConfig.DEFAULT_BOARD_SIZE):
-        """
-        初始化游戏界面
-        :param n: 棋盘尺寸，默认值为配置中的标准尺寸
-        """
+        """初始化游戏界面"""
         logger.info(f"Initializing game GUI with {n}x{n} board")
         self.n = n
         self.cell_size = GameConfig.CELL_SIZE
@@ -166,46 +163,40 @@ class GameGUI:
         """训练循环（支持双AI对抗）"""
         for episode in range(episodes):
             game = GameLogic(self.n)
-            total_reward = {1: 0, -1: 0}  # 分别记录双方奖励
+            total_reward = {1: 0, -1: 0}
 
             while not game.game_over:
-                # 当前玩家获取状态
                 state = self.ai.get_state(game)
                 valid_moves = game.get_valid_moves()
 
-                # AI决策
-                action = self.ai.act(state, valid_moves)
-                row, col = action
-
-                # 记录执行前状态
-                prev_state = self.ai.get_state(game).clone()
+                row, col = self.ai.act(state, valid_moves)
+                prev_state = self.ai.get_state(game)
                 game.make_move(row, col)
                 next_state = self.ai.get_state(game)
+                done = game.game_over
 
-                # 计算奖励（区分玩家）
                 reward = 0
-                if game.game_over:
+                if done:
                     if game.winner == game.current_player:
-                        reward = 1  # 当前玩家获胜
+                        reward = 1
                     elif game.winner is not None:
-                        reward = -1  # 当前玩家失败
+                        reward = -1
                 total_reward[game.current_player] += reward
 
-                # 存储经验（包含玩家标识）
+                # 修改后的remember调用（移除player参数）
                 self.ai.remember(
                     prev_state,
                     row * self.n + col,
                     reward,
                     next_state,
-                    game.game_over,
-                    player=game.current_player
+                    done
                 )
 
-                # 经验回放
                 self.ai.replay()
 
             if (episode + 1) % 100 == 0:
-                logging.info(f"Episode: {episode + 1}, Reward: {total_reward:.2f}, Epsilon: {self.ai.epsilon:.2f}")
+                avg_reward = sum(total_reward.values()) / 2
+                logging.info(f"Episode: {episode + 1}, Avg Reward: {avg_reward:.2f}, Epsilon: {self.ai.epsilon:.2f}")
                 self.ai.save_model()
 
     def start_human_game(self):

@@ -1,5 +1,4 @@
 # 导入模块
-
 import logging
 import os
 import random
@@ -27,7 +26,8 @@ class RLAgent:
         """
         logger.info(f"Initializing RLAgent for {n}x{n} board")
         self.n = n
-        self.input_size = n * n
+        self.input_size = n * n + 1  # 增加玩家特征维度
+        self.action_size = n * n
         self.memory = deque(maxlen=10000)
         self.gamma = 0.95
         self.epsilon = 1.0
@@ -39,13 +39,16 @@ class RLAgent:
 
         self._init_model()
         self._ensure_model_directory()
-
         logger.debug(f"Device in use: {self.model.device}")
 
     def _init_model(self) -> None:
         """初始化神经网络模型"""
         logger.debug("Building DQN model architecture")
-        self.model = DQN(self.input_size, use_gpu=self.use_gpu)
+        self.model = DQN(
+            input_size=self.input_size,
+            action_size=self.action_size,
+            use_gpu=self.use_gpu
+        )
         self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
 
         if os.path.exists(self.model_file):
@@ -59,8 +62,11 @@ class RLAgent:
         logger.debug(f"Model directory verified: {os.path.dirname(self.model_file)}")
 
     def get_state(self, game):
-        """获取游戏状态的扁平化表示"""
-        return torch.FloatTensor(game.board.flatten()).to(self.model.device)
+        """获取包含玩家信息的游戏状态"""
+        state = game.board.flatten().astype(np.float32)
+        # 添加当前玩家特征（1表示玩家1，0表示玩家-1）
+        current_player_feature = 1.0 if game.current_player == 1 else 0.0
+        return torch.FloatTensor(np.append(state, current_player_feature)).to(self.model.device)
 
     def remember(self, state, action, reward, next_state, done):
         """存储经验"""
@@ -72,8 +78,7 @@ class RLAgent:
             return random.choice(valid_moves)
         else:
             with torch.no_grad():
-                state_tensor = state.view(-1)
-                q_values = self.model(state_tensor)
+                q_values = self.model(state)
                 valid_actions = [i * self.n + j for (i, j) in valid_moves]
                 q_valid = q_values[valid_actions]
                 return valid_moves[torch.argmax(q_valid).item()]
@@ -83,22 +88,33 @@ class RLAgent:
         if len(self.memory) < self.batch_size:
             return
 
+        device = self.model.device  # 获取当前模型设备
         minibatch = random.sample(self.memory, self.batch_size)
-        states = torch.stack([x[0] for x in minibatch])
-        actions = torch.LongTensor([x[1] for x in minibatch]).view(-1, 1)
-        rewards = torch.FloatTensor([x[2] for x in minibatch])
-        next_states = torch.stack([x[3] for x in minibatch])
-        dones = torch.FloatTensor([x[4] for x in minibatch])
 
-        current_q = self.model(states).gather(1, actions)
-        next_q = self.model(next_states).max(1)[0].detach()
-        target = rewards + (1 - dones) * self.gamma * next_q
+        # 重新组织数据并确保设备一致性
+        states = torch.stack([x[0].to(device) for x in minibatch])
+        actions = torch.LongTensor([x[1] for x in minibatch]).to(device)
+        rewards = torch.FloatTensor([x[2] for x in minibatch]).to(device)
+        next_states = torch.stack([x[3].to(device) for x in minibatch])
+        dones = torch.FloatTensor([x[4] for x in minibatch]).to(device)
 
-        loss = F.mse_loss(current_q.squeeze(), target)
+        # 计算当前Q值（确保在模型设备）
+        current_q = self.model(states)
+        current_q = current_q.gather(1, actions.unsqueeze(1))
+
+        # 计算目标Q值（保持设备一致性）
+        next_q_values = self.model(next_states).max(1)[0].detach()
+        target_q = rewards + (1 - dones) * self.gamma * next_q_values
+
+        # 计算损失
+        loss = F.mse_loss(current_q.squeeze(), target_q)
+
+        # 反向传播优化
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
+        # 衰减探索率
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 

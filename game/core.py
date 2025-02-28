@@ -1,6 +1,8 @@
 # 导入模块
 import numpy as np
 
+from game.config import GameConfig
+
 
 class GameLogic:
     """游戏逻辑核心类"""
@@ -35,18 +37,16 @@ class GameLogic:
         return False
 
     def check_win(self, row, col):
-        """检查是否获胜"""
+        """改进的胜利条件校验"""
         player = self.board[row][col]
+        required = GameConfig.get_win_condition(self.n)
 
-        # 根据棋盘尺寸决定胜利条件
-        required = 3 if self.n < 5 else 5
-        if required > self.n:
-            required = self.n
-
-        # 检查行列和对角线
-        def check_line(dx, dy):
+        # 动态步长检查
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+        for dx, dy in directions:
             count = 1
-            for d in [-1, 1]:
+            # 双向检查
+            for d in [1, -1]:
                 step = 1
                 while True:
                     x = row + dx * d * step
@@ -59,10 +59,6 @@ class GameLogic:
                             break
                     else:
                         break
-            return count >= required
-
-        # 检查水平、垂直、两个对角线
-        return (check_line(0, 1) or  # 水平
-                check_line(1, 0) or  # 垂直
-                check_line(1, 1) or  # 主对角线
-                check_line(1, -1))  # 副对角线
+            if count >= required:
+                return True
+        return False

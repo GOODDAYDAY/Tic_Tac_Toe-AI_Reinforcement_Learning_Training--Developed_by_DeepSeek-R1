@@ -86,7 +86,12 @@ class RLAgent:
         logging.info(f"Model saved to {self.model_file}")
 
     def load_model(self):
-        """加载模型"""
+        """加载模型（增加维度检查）"""
+        if os.path.exists(self.model_file):
+            checkpoint = torch.load(self.model_file)
+            if checkpoint.get('input_size') != self.input_size:
+                logging.warning("Model dimension mismatch, skipping load")
+                return
         checkpoint = torch.load(self.model_file)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])

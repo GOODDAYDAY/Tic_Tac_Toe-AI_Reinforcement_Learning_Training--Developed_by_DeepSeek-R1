@@ -14,3 +14,12 @@ class GameConfig:
         'player2': 'red',
         'bg': 'white'
     }
+
+
+class TrainingConfig:
+    BATCH_SIZE = 128
+    GAMMA = 0.99
+    EPS_START = 1.0
+    EPS_END = 0.01
+    EPS_DECAY = 0.999
+    TARGET_UPDATE = 10  # 目标网络更新频率

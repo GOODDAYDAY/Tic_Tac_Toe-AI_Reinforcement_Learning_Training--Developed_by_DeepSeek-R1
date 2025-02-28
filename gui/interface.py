@@ -107,32 +107,43 @@ class GameGUI:
         self.train_mode = False
 
     def train_ai(self, episodes=1000):
-        """训练循环"""
+        """训练循环（支持双AI对抗）"""
         for episode in range(episodes):
             game = GameLogic(self.n)
-            state = self.ai.get_state(game)
-            total_reward = 0
+            total_reward = {1: 0, -1: 0}  # 分别记录双方奖励
 
             while not game.game_over:
+                # 当前玩家获取状态
+                state = self.ai.get_state(game)
                 valid_moves = game.get_valid_moves()
+
+                # AI决策
                 action = self.ai.act(state, valid_moves)
                 row, col = action
-                prev_state = state.clone()
+
+                # 记录执行前状态
+                prev_state = self.ai.get_state(game).clone()
                 game.make_move(row, col)
                 next_state = self.ai.get_state(game)
 
-                # 计算奖励
+                # 计算奖励（区分玩家）
+                reward = 0
                 if game.game_over:
-                    if game.winner == 1:  # AI作为先手时获胜
-                        reward = 1
-                    else:
-                        reward = -1 if game.winner == -1 else 0
-                else:
-                    reward = 0
+                    if game.winner == game.current_player:
+                        reward = 1  # 当前玩家获胜
+                    elif game.winner is not None:
+                        reward = -1  # 当前玩家失败
+                total_reward[game.current_player] += reward
 
-                self.ai.remember(prev_state, row * self.n + col, reward, next_state, game.game_over)
-                total_reward += reward
-                state = next_state
+                # 存储经验（包含玩家标识）
+                self.ai.remember(
+                    prev_state,
+                    row * self.n + col,
+                    reward,
+                    next_state,
+                    game.game_over,
+                    player=game.current_player
+                )
 
                 # 经验回放
                 self.ai.replay()

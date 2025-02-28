@@ -215,7 +215,7 @@ class GameGUI:
                         elif game.winner is not None:
                             reward = -1  # 被对手击败
                         else:
-                            reward = 0  # 平局
+                            reward = 0.1  # 平局
 
                     # 存储经验
                     action_index = row * self.n + col
@@ -236,10 +236,10 @@ class GameGUI:
                     else:
                         draw_count += 1
 
-                if (episode + 1) % 100 == 0:
-                    logger.info(
-                        f"Win Rate: {win_count / 100:.2%} | Loss Rate: {lose_count / 100:.2%} | Draw Rate: {draw_count / 100:.2%}")
-                    win_count = lose_count = draw_count = 0
+                    if (episode + 1) % 1000 == 0:
+                        logger.info(
+                            f"Win Rate: {win_count / 100:.2%} | Loss Rate: {lose_count / 100:.2%} | Draw Rate: {draw_count / 100:.2%}")
+                        win_count = lose_count = draw_count = 0
 
     def start_human_game(self):
         """开始人机对战（明确关闭训练模式）"""

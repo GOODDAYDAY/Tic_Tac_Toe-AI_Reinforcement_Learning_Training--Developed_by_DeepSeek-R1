@@ -92,8 +92,10 @@ class RLAgent:
     def act(self, state, valid_moves):
         """选择行动"""
         if np.random.rand() <= self.epsilon:
+            logger.info("random 执行")
             return random.choice(valid_moves)
         else:
+            logger.info("模型 执行")
             with torch.no_grad():
                 q_values = self.model(state)
                 valid_actions = [i * self.n + j for (i, j) in valid_moves]

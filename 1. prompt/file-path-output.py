@@ -1,16 +1,33 @@
+import ast
 import os
+
 
 def print_directory_tree(start_path):
     """
-    打印目录树结构，类似tree命令的输出。
+    打印目录树结构，类似tree命令的输出，并显示文件中的类名
     """
     dir_name = os.path.basename(os.path.abspath(start_path))
     print(f"{dir_name}/")
     _list_dir_contents(start_path, prefix="")
 
+
+def _get_classes_from_pyfile(filepath):
+    """从Python文件中提取类名"""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            node = ast.parse(f.read())
+    except (UnicodeDecodeError, SyntaxError):
+        return []
+
+    classes = []
+    for n in node.body:
+        if isinstance(n, ast.ClassDef):
+            classes.append(n.name)
+    return classes
+
 def _list_dir_contents(path, prefix):
     """
-    递归列出目录内容，生成树状结构
+    递归列出目录内容，生成树状结构，并显示类信息
     """
     try:
         # 过滤隐藏文件、__init__.py、.pyc文件
@@ -32,11 +49,19 @@ def _list_dir_contents(path, prefix):
         entry_path = os.path.join(path, entry)
 
         connector = "└── " if is_last else "├── "
-        print(f"{prefix}{connector}{entry}", end="")
+        entry_display = entry
+
+        # 如果是Python文件且非__init__.py，添加类信息
+        if entry.endswith('.py') and entry != '__init__.py':
+            classes = _get_classes_from_pyfile(entry_path)
+            if classes:
+                entry_display += f" [Classes: {', '.join(classes)}]"
+
+        print(f"{prefix}{connector}{entry_display}", end="")
 
         if os.path.isdir(entry_path):
             print("/")  # 目录添加斜杠
-            # 如果是名为"prompt"的目录，不递归展开其内容
+            # 跳过名为"1. prompt"的目录内容
             if entry != "1. prompt":
                 extension = "    " if is_last else "│   "
                 _list_dir_contents(entry_path, prefix + extension)

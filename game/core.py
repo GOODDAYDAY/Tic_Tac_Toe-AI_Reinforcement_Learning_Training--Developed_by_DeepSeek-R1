@@ -22,7 +22,7 @@ class GameLogic:
         初始化游戏逻辑
         :param n: 棋盘尺寸
         """
-        logger.info(f"Creating game logic for {n}x{n} board")
+        logger.debug(f"Creating game logic for {n}x{n} board")
         self.n = n
         self.win_condition = GameConfig.get_win_condition(n)
         self.reset()
@@ -37,6 +37,13 @@ class GameLogic:
         self.game_over = False
 
     def make_move(self, row: int, col: int) -> bool:
+        """执行移动前添加额外验证"""
+        if self.game_over:
+            logger.warning("Game already ended")
+            return False
+        return self._original_make_move(row, col)
+
+    def _original_make_move(self, row: int, col: int) -> bool:
         """
         执行移动操作，包含详细的合法性检查
         :return: 是否成功执行移动
@@ -49,7 +56,6 @@ class GameLogic:
             logger.debug(f"Position occupied: ({row}, {col})")
             return False
 
-        logger.info(f"Player {self.current_player} moves to ({row}, {col})")
         self.board[row][col] = self.current_player
 
         if self._check_win(row, col):
@@ -83,14 +89,14 @@ class GameLogic:
                     else:
                         break
             if count >= self.win_condition:
-                logger.info(f"Player {player} wins with {count} in a row")
+                logger.debug(f"Player {player} wins with {count} in a row")
                 return True
         return False
 
     def _check_draw(self) -> bool:
         """检查是否平局（私有方法）"""
         if np.all(self.board != 0):
-            logger.info("Game ended in a draw")
+            logger.debug("Game ended in a draw")
             return True
         return False
 
@@ -98,13 +104,12 @@ class GameLogic:
         """处理胜利场景（私有方法）"""
         self.winner = self.current_player
         self.game_over = True
-        logger.info(f"Player {self.winner} wins!")
 
     def _handle_draw(self) -> None:
         """处理平局场景（私有方法）"""
         self.winner = None
         self.game_over = True
-        logger.info("Game ended in a draw")
+        logger.debug("Game ended in a draw")
 
     def _switch_player(self) -> None:
         """切换当前玩家（私有方法）"""

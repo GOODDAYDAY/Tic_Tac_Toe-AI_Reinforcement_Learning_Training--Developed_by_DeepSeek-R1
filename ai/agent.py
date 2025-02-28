@@ -26,20 +26,22 @@ class RLAgent:
         """
         logger.info(f"Initializing RLAgent for {n}x{n} board")
         self.n = n
-        self.input_size = n * n + 1  # 增加玩家特征维度
+        self.input_size = n * n + 2
         self.action_size = n * n
         self.memory = deque(maxlen=10000)
-        self.gamma = 0.95
+        self.gamma = 0.99
         self.epsilon = 1.0
         self.epsilon_min = 0.01
-        self.epsilon_decay = 0.995
-        self.batch_size = 64
+        self.epsilon_decay = 0.997
+        self.batch_size = 128
         self.model_file = f"models/tictactoe_model_n{n}.pth"
         self.use_gpu = use_gpu
 
         self._init_model()
         self._ensure_model_directory()
         logger.debug(f"Device in use: {self.model.device}")
+        logger.info(f"模型初始化到设备：{self.model.device}")
+        logger.debug(f"首个参数设备：{next(self.model.parameters()).device}")
 
     def _init_model(self) -> None:
         """初始化神经网络模型"""
@@ -62,11 +64,26 @@ class RLAgent:
         logger.debug(f"Model directory verified: {os.path.dirname(self.model_file)}")
 
     def get_state(self, game):
-        """获取包含玩家信息的游戏状态"""
+        """获取增强版游戏状态（增加维度验证）"""
         state = game.board.flatten().astype(np.float32)
-        # 添加当前玩家特征（1表示玩家1，0表示玩家-1）
-        current_player_feature = 1.0 if game.current_player == 1 else 0.0
-        return torch.FloatTensor(np.append(state, current_player_feature)).to(self.model.device)
+        # 验证棋盘维度
+        if len(state) != self.n * self.n:
+            raise ValueError(f"棋盘维度错误，预期{self.n}x{self.n}，实际长度{len(state)}")
+
+        # 玩家特征（当前玩家和对手）
+        current_player = game.current_player
+        player_feature = np.array([
+            1.0 if current_player == 1 else 0.0,
+            1.0 if current_player == -1 else 0.0
+        ], dtype=np.float32)
+
+        combined_state = np.concatenate([state, player_feature])
+
+        # 最终维度验证
+        if len(combined_state) != self.input_size:
+            raise ValueError(f"状态维度错误，预期{self.input_size}，实际{len(combined_state)}")
+
+        return torch.FloatTensor(combined_state).to(self.model.device)
 
     def remember(self, state, action, reward, next_state, done):
         """存储经验"""
@@ -119,23 +136,26 @@ class RLAgent:
             self.epsilon *= self.epsilon_decay
 
     def save_model(self):
-        """保存模型"""
+        """保存模型（包含完整维度信息）"""
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'epsilon': self.epsilon
+            'epsilon': self.epsilon,
+            'input_size': self.input_size,  # 新增维度保存
+            'action_size': self.action_size  # 新增动作空间保存
         }, self.model_file)
-        logging.info(f"Model saved to {self.model_file}")
 
     def load_model(self):
-        """加载模型（增加维度检查）"""
+        """加载模型（增强维度验证）"""
         if os.path.exists(self.model_file):
             checkpoint = torch.load(self.model_file)
-            if checkpoint.get('input_size') != self.input_size:
-                logging.warning("Model dimension mismatch, skipping load")
+            # 双重维度验证
+            if checkpoint.get('input_size') != self.input_size or \
+                    checkpoint.get('action_size') != self.action_size:
+                logger.warning(
+                    f"模型维度不匹配（当前输入:{self.input_size} 动作:{self.action_size}，文件输入:{checkpoint.get('input_size')} 动作:{checkpoint.get('action_size')}）")
                 return
-        checkpoint = torch.load(self.model_file)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.epsilon = checkpoint.get('epsilon', self.epsilon_min)
-        logging.info(f"Loaded model from {self.model_file}")
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            self.epsilon = checkpoint.get('epsilon', self.epsilon_min)
+            logger.info(f"从 {self.model_file} 加载模型成功")

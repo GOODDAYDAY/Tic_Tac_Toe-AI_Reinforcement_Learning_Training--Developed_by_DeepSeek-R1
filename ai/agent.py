@@ -49,9 +49,9 @@ class RLAgent:
         """初始化超参数"""
         self.memory = deque(maxlen=10000)
         self.gamma = 0.99  # 折扣因子
-        self.epsilon = 10.0  # 初始探索率
-        self.epsilon_min = 0.4  # 最小探索率
-        self.epsilon_decay = 0.997  # 探索率衰减
+        self.epsilon = 1.0  # 初始探索率
+        self.epsilon_min = 0.1  # 最小探索率
+        self.epsilon_decay = 0.9997  # 探索率衰减
         self.batch_size = 128  # 批量大小
 
         # 模型文件路径
@@ -78,30 +78,41 @@ class RLAgent:
         os.makedirs(os.path.dirname(self.model_file), exist_ok=True)
         logger.debug(f"Model directory verified: {os.path.dirname(self.model_file)}")
 
+    def _normalize_state(self, state: np.ndarray) -> np.ndarray:
+        """将棋盘状态转换为标准形式（考虑旋转和镜像对称）"""
+        board = state[:-2].reshape(self.n, self.n)
+        player_feature = state[-2:]
+
+        min_hash = float('inf')
+        best_rotation = board
+
+        # 检查所有对称变换
+        for k in range(4):
+            rotated = np.rot90(board, k)
+            mirrored = np.fliplr(rotated)
+
+            for version in [rotated, mirrored]:
+                current_hash = hash(version.tobytes())
+                if current_hash < min_hash:
+                    min_hash = current_hash
+                    best_rotation = version
+
+        # 保持玩家特征不变
+        return np.concatenate([best_rotation.flatten(), player_feature])
+
     def get_state(self, game) -> torch.Tensor:
         """
         获取增强版游戏状态（包含当前玩家信息）
         :param game: 游戏逻辑实例
         :return: 状态张量
         """
-        # 获取棋盘状态
-        state = game.board.flatten().astype(np.float32)
-        if len(state) != self.n * self.n:
-            raise ValueError(f"棋盘维度错误，预期{self.n}x{self.n}，实际长度{len(state)}")
-
-        # 玩家特征（当前玩家和对手）
+        raw_state = game.board.flatten().astype(np.float32)
         current_player = game.current_player
-        player_feature = np.array([
-            1.0 if current_player == 1 else 0.0,
-            1.0 if current_player == -1 else 0.0
-        ], dtype=np.float32)
-
-        # 组合状态张量
-        combined_state = np.concatenate([state, player_feature])
-        if len(combined_state) != self.input_size:
-            raise ValueError(f"状态维度错误，预期{self.input_size}，实际{len(combined_state)}")
-
-        return torch.FloatTensor(combined_state).to(self.model.device)
+        player_feature = np.array([1.0 if current_player == 1 else 0.0,
+                                   1.0 if current_player == -1 else 0.0])
+        combined = np.concatenate([raw_state, player_feature])
+        normalized = self._normalize_state(combined)  # 新增归一化
+        return torch.FloatTensor(normalized).to(self.model.device)
 
     def act(self,
             state: torch.Tensor,
@@ -141,7 +152,6 @@ class RLAgent:
         :param next_state: 下一状态
         :param done: 是否结束
         """
-        print(f"Remembering experience: {state}, {action}, {reward}, {next_state}, {done}")
         self.memory.append((state, action, reward, next_state, done))
 
     def replay(self) -> None:
@@ -200,7 +210,7 @@ class RLAgent:
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             self.epsilon = checkpoint.get('epsilon', self.epsilon_min)
-            logger.info(f"Loaded model from {self.model_file}")
+            logger.info(f"Loaded model from {self.model_file} Epsilon: {self.epsilon}")
         except Exception as e:
             logger.error(f"Failed to load model: {str(e)}")
             raise

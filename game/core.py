@@ -26,8 +26,6 @@ class GameLogic:
         self.n = n
         self.win_condition = GameConfig.get_win_condition(n)
         self.reset()
-        # 新增回合状态属性
-        self.is_human_turn = True
         logger.debug(f"Win condition set to {self.win_condition} in a row")
 
     def reset(self) -> None:
@@ -37,7 +35,6 @@ class GameLogic:
         self.current_player = 1
         self.winner: Optional[int] = None
         self.game_over = False
-        self.is_human_turn = True
 
     def make_move(self, row: int, col: int) -> bool:
         """执行移动前添加额外验证"""

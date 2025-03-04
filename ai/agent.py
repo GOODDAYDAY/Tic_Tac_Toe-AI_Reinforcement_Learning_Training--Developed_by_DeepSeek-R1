@@ -49,8 +49,8 @@ class RLAgent:
         """初始化超参数"""
         self.memory = deque(maxlen=10000)
         self.gamma = 0.99  # 折扣因子
-        self.epsilon = 1.0  # 初始探索率
-        self.epsilon_min = 0.01  # 最小探索率
+        self.epsilon = 10.0  # 初始探索率
+        self.epsilon_min = 0.4  # 最小探索率
         self.epsilon_decay = 0.997  # 探索率衰减
         self.batch_size = 128  # 批量大小
 
@@ -121,6 +121,7 @@ class RLAgent:
 
         # 推理模式使用模型预测
         with torch.no_grad():
+            logger.debug("Model exploration")
             q_values = self.model(state)
             valid_actions = [i * self.n + j for (i, j) in valid_moves]
             q_valid = q_values[valid_actions]
@@ -140,6 +141,7 @@ class RLAgent:
         :param next_state: 下一状态
         :param done: 是否结束
         """
+        print(f"Remembering experience: {state}, {action}, {reward}, {next_state}, {done}")
         self.memory.append((state, action, reward, next_state, done))
 
     def replay(self) -> None:
@@ -173,7 +175,7 @@ class RLAgent:
 
         # 衰减探索率
         if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
+            self.epsilon = self.epsilon * self.epsilon_decay
 
     def save_model(self) -> None:
         """保存模型到文件"""

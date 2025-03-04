@@ -24,6 +24,7 @@ class GameGUI:
         self.game: Optional[GameLogic] = None
         self.ai: Optional[RLAgent] = None
         self.trainer: Optional[AITrainer] = None
+        self.is_human_turn: bool = True
 
         # 初始化界面组件
         self.root = tk.Tk()
@@ -63,6 +64,7 @@ class GameGUI:
         self.game = GameLogic(self.n)
         self.ai = RLAgent(self.n, training_mode=False)
         self.trainer = AITrainer(self.ai, self.n)
+        self.is_human_turn = True
         self.update_board()
 
     def update_board(self) -> None:
@@ -99,7 +101,7 @@ class GameGUI:
 
     def on_click(self, event) -> None:
         """处理玩家点击事件"""
-        if self.game.game_over or not self.game.is_human_turn:
+        if self.game.game_over or not self.is_human_turn:
             return
 
         col = event.x // GameConfig.CELL_SIZE
@@ -108,7 +110,7 @@ class GameGUI:
         if self.game.make_move(row, col):
             self.update_board()
             if not self.game.game_over:
-                self.game.is_human_turn = False
+                self.is_human_turn = False
                 self._ai_move()
 
     def _ai_move(self) -> None:
@@ -118,7 +120,7 @@ class GameGUI:
         row, col = self.ai.act(state, valid_moves)
         self.game.make_move(row, col)
         self.update_board()
-        self.game.is_human_turn = True
+        self.is_human_turn = True
 
     def start_training(self) -> None:
         """启动AI训练流程"""
@@ -139,6 +141,7 @@ class GameGUI:
         """启动人机对战模式"""
         self.new_game()
         if random.choice([True, False]):
+            self.is_human_turn = False
             self._ai_move()
 
     def _handle_game_end(self) -> None:

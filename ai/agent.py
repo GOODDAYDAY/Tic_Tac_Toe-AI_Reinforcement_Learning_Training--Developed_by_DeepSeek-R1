@@ -14,6 +14,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from game.config import GameConfig
+from utils.timer import timer
 from .dqn import DQN
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class RLAgent:
 
         logger.info(f"Initialized RLAgent in {'training' if training_mode else 'inference'} mode")
 
+    @timer
     def _init_hyperparameters(self) -> None:
         """初始化超参数"""
         self.memory = deque(maxlen=10000)
@@ -57,6 +59,7 @@ class RLAgent:
         # 模型文件路径
         self.model_file = f"models/tictactoe_n{self.n}_v2.pth"
 
+    @timer
     def _init_model(self) -> None:
         """初始化神经网络模型"""
         logger.debug("Building DQN model architecture")
@@ -73,11 +76,13 @@ class RLAgent:
         else:
             logger.info("No pre-trained model found, initializing new model")
 
+    @timer
     def _ensure_model_directory(self) -> None:
         """确保模型保存目录存在"""
         os.makedirs(os.path.dirname(self.model_file), exist_ok=True)
         logger.debug(f"Model directory verified: {os.path.dirname(self.model_file)}")
 
+    @timer
     def _normalize_state(self, state: np.ndarray) -> np.ndarray:
         """将棋盘状态转换为标准形式（考虑旋转和镜像对称）"""
         board = state[:-2].reshape(self.n, self.n)
@@ -100,6 +105,7 @@ class RLAgent:
         # 保持玩家特征不变
         return np.concatenate([best_rotation.flatten(), player_feature])
 
+    @timer
     def get_state(self, game) -> torch.Tensor:
         """
         获取增强版游戏状态（包含当前玩家信息）
@@ -114,6 +120,7 @@ class RLAgent:
         normalized = self._normalize_state(combined)  # 新增归一化
         return torch.FloatTensor(normalized).to(self.model.device)
 
+    @timer
     def act(self,
             state: torch.Tensor,
             valid_moves: List[Tuple[int, int]],
@@ -138,6 +145,7 @@ class RLAgent:
             q_valid = q_values[valid_actions]
             return valid_moves[torch.argmax(q_valid).item()]
 
+    @timer
     def remember(self,
                  state: torch.Tensor,
                  action: int,
@@ -154,6 +162,7 @@ class RLAgent:
         """
         self.memory.append((state, action, reward, next_state, done))
 
+    @timer
     def replay(self) -> None:
         """执行经验回放训练"""
         if len(self.memory) < self.batch_size:
@@ -187,6 +196,7 @@ class RLAgent:
         if self.epsilon > self.epsilon_min:
             self.epsilon = self.epsilon * self.epsilon_decay
 
+    @timer
     def save_model(self) -> None:
         """保存模型到文件"""
         torch.save({
@@ -198,6 +208,7 @@ class RLAgent:
         }, self.model_file)
         logger.info(f"Model saved to {self.model_file}")
 
+    @timer
     def load_model(self) -> None:
         """从文件加载模型"""
         try:

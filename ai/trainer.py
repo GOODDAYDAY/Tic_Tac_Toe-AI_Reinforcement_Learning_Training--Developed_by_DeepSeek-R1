@@ -7,6 +7,7 @@ import random
 
 from ai.agent import RLAgent
 from game.core import GameLogic
+from utils.timer import timer
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class AITrainer:
         self.n = n
         logger.info(f"Initialized AI trainer for {n}x{n} board")
 
+    @timer
     def train(self, episodes: int = 1000) -> dict:
         """
         执行训练循环
@@ -71,6 +73,7 @@ class AITrainer:
 
         return stats
 
+    @timer
     def _train_step(self, game: GameLogic, ai_player: int) -> tuple:
         """单步训练流程，返回执行的动作和结果"""
         state = self.agent.get_state(game)
@@ -86,96 +89,118 @@ class AITrainer:
         done = game.game_over
         return (row, col, 0, done)
 
-    def _calculate_instant_reward(self, game: GameLogic, ai_player: int, row: int, col: int) -> float:
-        """计算即时奖励，包含潜在胜利路径奖励"""
-        temp_game = copy.deepcopy(game)
-        temp_game.make_move(row, col)
-
-        # 最终结果奖励
-        if temp_game.winner == ai_player:
-            return 1.0
-        elif temp_game.winner is not None:
-            return -10.0
-
-        # 1. 堵住敌方胜利的奖励（+10）
-        block_reward = 0.0
-        original_game = copy.deepcopy(game)
+    @timer
+    def _calculate_instant_reward(self, prev_game: GameLogic, ai_player: int, row: int, col: int) -> float:
+        """优化后的即时奖励计算，避免深拷贝并优化检测逻辑"""
+        # 生成下子后的棋盘副本（仅复制棋盘数据）
+        board = [row.copy() for row in prev_game.board]
+        board[row][col] = ai_player  # 应用当前落子
+        n = prev_game.n
+        win_condition = prev_game.win_condition
         opponent = -ai_player
+        block_reward = 0.0
+        winning_reward = 0.0
+        threat_reward = 0.0
+
+        # 1. 堵住敌方胜利的奖励（使用原游戏状态检测）
         opponent_winning_moves = []
-
-        # 检查原游戏中对手可获胜的位置
-        for r in range(original_game.n):
-            for c in range(original_game.n):
-                if original_game.board[r][c] == 0:
-                    temp_opponent = copy.deepcopy(original_game)
-                    temp_opponent.current_player = opponent
-                    if temp_opponent.make_move(r, c) and temp_opponent.winner == opponent:
-                        opponent_winning_moves.append((r, c))
-
+        for r in range(prev_game.n):
+            for c in range(prev_game.n):
+                if prev_game.board[r][c] == 0 and self._is_winning_move(prev_game, r, c, opponent):
+                    opponent_winning_moves.append((r, c))
         if (row, col) in opponent_winning_moves:
             block_reward += 10.0
 
-        # 2. 下一步必胜奖励（+100）
-        winning_reward = 0.0
-        for r in range(temp_game.n):
-            for c in range(temp_game.n):
-                if temp_game.board[r][c] == 0:
-                    temp_win_check = copy.deepcopy(temp_game)
-                    temp_win_check.current_player = ai_player  # 强制设置当前玩家
-                    if temp_win_check.make_move(r, c) and temp_win_check.winner == ai_player:
-                        winning_reward = 100.0
-                        break
+        # 2. 下一步必胜奖励（使用新棋盘状态检测）
+        for r in range(n):
+            for c in range(n):
+                if board[r][c] == 0 and self._is_winning_move_on_board(board, n, win_condition, r, c, ai_player):
+                    winning_reward = 100.0
+                    break
             if winning_reward > 0:
                 break
 
-        # 3. 优化后的威胁检测（基于棋局实际获胜条件）
-        threat_reward = 0.0
-        win_condition = temp_game.win_condition
+        # 3. 基于连续性的威胁检测（优化后的算法）
         directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
-
         for dx, dy in directions:
-            # 生成完整方向线
-            line = []
-            # 正向延伸（包含当前点）
-            step = 0
-            while True:
-                x, y = row + dx * step, col + dy * step
-                if 0 <= x < self.n and 0 <= y < self.n:
-                    line.append(temp_game.board[x][y])
-                    step += 1
-                else:
-                    break
-            # 反向延伸（不含当前点）
-            step = -1
-            while True:
-                x, y = row + dx * step, col + dy * step
-                if 0 <= x < self.n and 0 <= y < self.n:
-                    line.insert(0, temp_game.board[x][y])
-                    step -= 1
-                else:
-                    break
+            # 检测己方威胁
+            ai_continuous = self._count_continuous(board, n, row, col, dx, dy, ai_player)
+            if ai_continuous >= win_condition - 1:
+                threat_reward += 0.5
 
-            # 滑动窗口检测威胁
-            for i in range(len(line) - win_condition + 1):
-                window = line[i:i + win_condition]
-                ai_count = sum(1 for p in window if p == ai_player)
-                opp_count = sum(1 for p in window if p == -ai_player)
-                empty = window.count(0)
+            # 检测敌方威胁（遍历棋盘检测敌方潜在胜利路径）
+            if win_condition > 3:  # 仅在需要时检测（如五子棋模式）
+                for r in range(n):
+                    for c in range(n):
+                        if board[r][c] == opponent and self._count_continuous(board, n, r, c, dx, dy,
+                                                                              opponent) >= win_condition - 1:
+                            threat_reward -= 0.7
 
-                # 检测己方威胁（差一棋胜利）
-                if ai_count == win_condition - 1 and empty == 1:
-                    threat_reward += 0.5  # 原0.2 -> 调整为0.5 * 0.5 = 0.25
-                # 检测敌方威胁（差一棋失败）
-                if opp_count == win_condition - 1 and empty == 1:
-                    threat_reward -= 0.7  # 原0.3 -> 调整为0.7 * 0.5 = 0.35
+        return block_reward + winning_reward + threat_reward * 0.5
 
-        # 合并所有奖励（威胁奖励适当缩减）
-        return (
-                block_reward +
-                winning_reward +
-                threat_reward * 0.5  # 缩减系数
-        )
+    @timer
+    def _is_winning_move(self, game: GameLogic, row: int, col: int, player: int) -> bool:
+        """检查指定位置落子是否直接导致胜利"""
+        board = game.board
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+        for dx, dy in directions:
+            count = 1
+            # 正向延伸
+            x, y = row + dx, col + dy
+            while 0 <= x < game.n and 0 <= y < game.n and board[x][y] == player:
+                count += 1
+                x += dx
+                y += dy
+            # 反向延伸
+            x, y = row - dx, col - dy
+            while 0 <= x < game.n and 0 <= y < game.n and board[x][y] == player:
+                count += 1
+                x -= dx
+                y -= dy
+            if count >= game.win_condition:
+                return True
+        return False
 
+    @timer
+    def _is_winning_move_on_board(self, board: list, n: int, win_condition: int, row: int, col: int,
+                                  player: int) -> bool:
+        """在指定棋盘状态检查落子是否胜利"""
+        directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
+        for dx, dy in directions:
+            count = 1
+            x, y = row + dx, col + dy
+            while 0 <= x < n and 0 <= y < n and board[x][y] == player:
+                count += 1
+                x += dx
+                y += dy
+            x, y = row - dx, col - dy
+            while 0 <= x < n and 0 <= y < n and board[x][y] == player:
+                count += 1
+                x -= dx
+                y -= dy
+            if count >= win_condition:
+                return True
+        return False
+
+    @timer
+    def _count_continuous(self, board: list, n: int, row: int, col: int, dx: int, dy: int, player: int) -> int:
+        """计算指定方向连续同色棋子数量"""
+        count = 0
+        # 正向延伸
+        x, y = row, col
+        while 0 <= x < n and 0 <= y < n and board[x][y] == player:
+            count += 1
+            x += dx
+            y += dy
+        # 反向延伸
+        x, y = row - dx, col - dy
+        while 0 <= x < n and 0 <= y < n and board[x][y] == player:
+            count += 1
+            x -= dx
+            y -= dy
+        return count
+
+    @timer
     def _calculate_final_reward(self, game: GameLogic, ai_player: int) -> float:
         """根据最终结果计算奖励"""
         if game.winner == ai_player:
@@ -184,6 +209,7 @@ class AITrainer:
             return -1.0
         return 0.1
 
+    @timer
     def _adjust_episode_rewards(self, experiences: list, final_reward: float) -> None:
         """调整最终奖励并合成总奖励"""
         total_steps = len(experiences)
@@ -197,6 +223,7 @@ class AITrainer:
             discount *= gamma
             experiences[i] = (state, action, new_reward, next_state, done)
 
+    @timer
     def _calculate_reward(self, game: GameLogic, ai_player: int, done: bool) -> float:
         """根据游戏状态计算奖励"""
         if not done:
@@ -208,6 +235,7 @@ class AITrainer:
             return -1.0
         return 0.1
 
+    @timer
     def _update_stats(self, game: GameLogic, ai_player: int, stats: dict) -> None:
         """更新训练统计信息"""
         if game.winner == ai_player:

@@ -3,8 +3,10 @@ import sys
 
 from gui.interface import GameGUI
 from utils.logger import configure_logger
+from utils.timer import timer
 
 
+@timer
 def main():
     """应用程序主入口"""
     # 初始化日志系统

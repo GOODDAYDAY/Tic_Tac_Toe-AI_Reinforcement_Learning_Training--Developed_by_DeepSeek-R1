@@ -115,7 +115,7 @@ class AITrainer:
         for r in range(n):
             for c in range(n):
                 if board[r][c] == 0 and self._is_winning_move_on_board(board, n, win_condition, r, c, ai_player):
-                    winning_reward = 100.0
+                    winning_reward = 10.0
                     break
             if winning_reward > 0:
                 break
@@ -204,10 +204,10 @@ class AITrainer:
     def _calculate_final_reward(self, game: GameLogic, ai_player: int) -> float:
         """根据最终结果计算奖励"""
         if game.winner == ai_player:
-            return 1.0
+            return 100.0
         if game.winner is not None:
-            return -1.0
-        return 0.1
+            return -100.0
+        return 5
 
     @timer
     def _adjust_episode_rewards(self, experiences: list, final_reward: float) -> None:

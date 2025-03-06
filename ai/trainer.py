@@ -37,34 +37,35 @@ class AITrainer:
         for episode in range(episodes):
             game = GameLogic(self.n)
             ai_player = random.choice([1, -1])
+            opponent_player = -ai_player
             game.current_player = ai_player
-            episode_experiences = []  # 存储本回合所有经验
+            episode_experiences_ai = []  # 存储AI玩家本回合所有经验
+            episode_experiences_opponent = []  # 存储对手玩家本回合所有经验
 
             while not game.game_over:
-                # 保存初始状态快照
                 prev_state = self.agent.get_state(game)
                 prev_game = copy.deepcopy(game)
 
-                # 执行训练步骤
-                row, col, reward, done = self._train_step(game, ai_player)
+                row, col, reward, done = self._train_step(game, game.current_player, episode)
 
-                # 存储经验（延迟计算奖励）
                 action_index = row * self.n + col
                 next_state = self.agent.get_state(game)
-                episode_experiences.append(
+                episode_experiences_ai.append(
                     (prev_state, action_index, 0, next_state, done)  # 初始奖励设为0
                 )
 
-                # 使用游戏副本回退到上一步来计算即时奖励
-                instant_reward = self._calculate_instant_reward(prev_game, ai_player, row, col)
-                episode_experiences[-1] = (prev_state, action_index, instant_reward, next_state, done)
+                instant_reward = self._calculate_instant_reward(prev_game, game.current_player, row, col)
+                episode_experiences_ai[-1] = (prev_state, action_index, instant_reward, next_state, done)
 
-                # 添加最终结果奖励
-            final_reward = self._calculate_final_reward(game, ai_player)
-            self._adjust_episode_rewards(episode_experiences, final_reward)
+            # 添加最终结果奖励
+            final_reward_ai = self._calculate_final_reward(game, ai_player)
+            final_reward_opponent = self._calculate_final_reward(game, opponent_player)
+
+            self._adjust_episode_rewards(episode_experiences_ai, final_reward_ai)
+            self._adjust_episode_rewards(episode_experiences_opponent, final_reward_opponent)
 
             # 存入经验池并回放
-            for exp in episode_experiences:
+            for exp in episode_experiences_ai + episode_experiences_opponent:
                 self.agent.remember(*exp)
             self.agent.replay()
 
@@ -74,7 +75,7 @@ class AITrainer:
         return stats
 
     @timer
-    def _train_step(self, game: GameLogic, ai_player: int) -> tuple:
+    def _train_step(self, game: GameLogic, player: int, episode: int) -> tuple:
         """单步训练流程，返回执行的动作和结果"""
         state = self.agent.get_state(game)
         valid_moves = game.get_valid_moves()
@@ -82,22 +83,30 @@ class AITrainer:
         if not valid_moves:
             return (0, 0, 0, True)
 
+        # 策略：第一步固定走中间，除非中间已被占据
+        if episode == 0 and len(valid_moves) == game.n * game.n:
+            mid = game.n // 2
+            if game.board[mid][mid] == 0:  # 检查中间位置是否为空
+                row, col = mid, mid
+            else:
+                row, col = self.agent.act(state, valid_moves, training=True)
+        else:
             # 选择并执行动作
-        row, col = self.agent.act(state, valid_moves, training=True)
+            row, col = self.agent.act(state, valid_moves, training=True)
         move_success = game.make_move(row, col)
 
         done = game.game_over
         return (row, col, 0, done)
 
     @timer
-    def _calculate_instant_reward(self, prev_game: GameLogic, ai_player: int, row: int, col: int) -> float:
+    def _calculate_instant_reward(self, prev_game: GameLogic, player: int, row: int, col: int) -> float:
         """优化后的即时奖励计算，避免深拷贝并优化检测逻辑"""
         # 生成下子后的棋盘副本（仅复制棋盘数据）
         board = [row.copy() for row in prev_game.board]
-        board[row][col] = ai_player  # 应用当前落子
+        board[row][col] = player  # 应用当前落子
         n = prev_game.n
         win_condition = prev_game.win_condition
-        opponent = -ai_player
+        opponent = -player
         block_reward = 0.0
         winning_reward = 0.0
         threat_reward = 0.0
@@ -109,13 +118,13 @@ class AITrainer:
                 if prev_game.board[r][c] == 0 and self._is_winning_move(prev_game, r, c, opponent):
                     opponent_winning_moves.append((r, c))
         if (row, col) in opponent_winning_moves:
-            block_reward += 10.0
+            block_reward += 20.0  # 修改策略：堵住别人成功 +20 分
 
         # 2. 下一步必胜奖励（使用新棋盘状态检测）
         for r in range(n):
             for c in range(n):
-                if board[r][c] == 0 and self._is_winning_move_on_board(board, n, win_condition, r, c, ai_player):
-                    winning_reward = 10.0
+                if board[r][c] == 0 and self._is_winning_move_on_board(board, n, win_condition, r, c, player):
+                    winning_reward = 20.0  # 修改策略：自己下一步成功 +20 分
                     break
             if winning_reward > 0:
                 break
@@ -124,8 +133,8 @@ class AITrainer:
         directions = [(0, 1), (1, 0), (1, 1), (1, -1)]
         for dx, dy in directions:
             # 检测己方威胁
-            ai_continuous = self._count_continuous(board, n, row, col, dx, dy, ai_player)
-            if ai_continuous >= win_condition - 1:
+            player_continuous = self._count_continuous(board, n, row, col, dx, dy, player)
+            if player_continuous >= win_condition - 1:
                 threat_reward += 0.5
 
             # 检测敌方威胁（遍历棋盘检测敌方潜在胜利路径）
@@ -201,13 +210,13 @@ class AITrainer:
         return count
 
     @timer
-    def _calculate_final_reward(self, game: GameLogic, ai_player: int) -> float:
+    def _calculate_final_reward(self, game: GameLogic, player: int) -> float:
         """根据最终结果计算奖励"""
-        if game.winner == ai_player:
-            return 100.0
+        if game.winner == player:
+            return 100.0  # 自己成功 +100 分
         if game.winner is not None:
-            return -100.0
-        return 5
+            return -100.0  # 自己失败 -100 分
+        return 5.0  # 没有成功 +5 分
 
     @timer
     def _adjust_episode_rewards(self, experiences: list, final_reward: float) -> None:
@@ -224,12 +233,12 @@ class AITrainer:
             experiences[i] = (state, action, new_reward, next_state, done)
 
     @timer
-    def _calculate_reward(self, game: GameLogic, ai_player: int, done: bool) -> float:
+    def _calculate_reward(self, game: GameLogic, player: int, done: bool) -> float:
         """根据游戏状态计算奖励"""
         if not done:
             return 0.0
 
-        if game.winner == ai_player:
+        if game.winner == player:
             return 1.0
         if game.winner is not None:
             return -1.0

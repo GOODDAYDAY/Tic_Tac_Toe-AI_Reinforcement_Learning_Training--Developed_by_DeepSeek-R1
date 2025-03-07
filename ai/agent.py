@@ -57,7 +57,7 @@ class RLAgent:
         self.batch_size = 128  # 批量大小
 
         # 模型文件路径
-        self.model_file = f"models/tictactoe_n{self.n}_v2.pth"
+        self.model_file = f"models/tictactoe_n{self.n}_v3.pth"
 
     @timer
     def _init_model(self) -> None:
@@ -83,84 +83,73 @@ class RLAgent:
         logger.debug(f"Model directory verified: {os.path.dirname(self.model_file)}")
 
     @timer
-    def _normalize_state(self, state: np.ndarray) -> np.ndarray:
-        """将棋盘状态转换为标准形式（考虑旋转和镜像对称）"""
+    def _generate_symmetries(self, board: np.ndarray) -> list:
+        """生成所有对称变换后的棋盘状态"""
+        symmetries = []
+        for k in range(4):
+            # 原始旋转
+            rotated = np.rot90(board, k)
+            symmetries.append(rotated)
+            # 镜像变换
+            symmetries.append(np.fliplr(rotated))
+        return symmetries
+
+    @timer
+    def _normalize_state(self, state: np.ndarray) -> list:
+        """标准化状态处理（返回所有对称状态）"""
         board = state[:-2].reshape(self.n, self.n)
         player_feature = state[-2:]
 
-        min_hash = float('inf')
-        best_rotation = board
+        normalized_states = []
+        for transformed in self._generate_symmetries(board):
+            # 保持玩家特征不变
+            normalized = np.concatenate([transformed.flatten(), player_feature])
+            normalized_states.append(normalized)
 
-        # 检查所有对称变换
-        for k in range(4):
-            rotated = np.rot90(board, k)
-            mirrored = np.fliplr(rotated)
+            # 生成玩家反转的对称状态（正反方对称）
+            reversed_player = np.array([player_feature[1], player_feature[0]])
+            reversed_state = np.concatenate([transformed.flatten(), reversed_player])
+            normalized_states.append(reversed_state)
 
-            for version in [rotated, mirrored]:
-                current_hash = hash(version.tobytes())
-                if current_hash < min_hash:
-                    min_hash = current_hash
-                    best_rotation = version
-
-        # 保持玩家特征不变
-        return np.concatenate([best_rotation.flatten(), player_feature])
+        return normalized_states
 
     @timer
-    def get_state(self, game) -> torch.Tensor:
-        """
-        获取增强版游戏状态（包含当前玩家信息）
-        :param game: 游戏逻辑实例
-        :return: 状态张量
-        """
+    def get_state(self, game) -> list:
+        """获取所有对称状态"""
         raw_state = game.board.flatten().astype(np.float32)
         current_player = game.current_player
         player_feature = np.array([1.0 if current_player == 1 else 0.0,
                                    1.0 if current_player == -1 else 0.0])
         combined = np.concatenate([raw_state, player_feature])
-        normalized = self._normalize_state(combined)  # 新增归一化
-        return torch.FloatTensor(normalized).to(self.model.device)
+        return [torch.FloatTensor(s).to(self.model.device) for s in self._normalize_state(combined)]
 
     @timer
     def act(self,
-            state: torch.Tensor,
+            states: list,  # 修改为接收多个状态
             valid_moves: List[Tuple[int, int]],
             training: bool = False) -> Tuple[int, int]:
-        """
-        根据当前状态选择动作
-        :param state: 当前游戏状态
-        :param valid_moves: 合法移动列表
-        :param training: 是否处于训练模式
-        :return: 选择的动作坐标 (row, col)
-        """
-        # 训练模式使用epsilon-greedy策略
+        """基于所有对称状态选择最佳动作"""
         if training and np.random.rand() <= self.epsilon:
-            logger.debug("Random exploration")
             return random.choice(valid_moves)
-
-        # 推理模式使用模型预测
         with torch.no_grad():
-            logger.debug("Model exploration")
-            q_values = self.model(state)
+            # 综合所有对称状态的Q值
+            q_values = torch.zeros(self.action_size, device=self.model.device)
+            for state in states:
+                q_values += self.model(state)
+
             valid_actions = [i * self.n + j for (i, j) in valid_moves]
-            q_valid = q_values[valid_actions]
-            return valid_moves[torch.argmax(q_valid).item()]
+            return valid_moves[torch.argmax(q_values[valid_actions]).item()]
 
     @timer
     def remember(self,
-                 state: torch.Tensor,
+                 states: list,  # 修改为接收多个状态
                  action: int,
                  reward: float,
-                 next_state: torch.Tensor,
+                 next_states: list,
                  done: bool) -> None:
-        """
-        存储经验到记忆库
-        :param state: 当前状态
-        :param action: 执行动作
-        :param reward: 获得奖励
-        :param next_state: 下一状态
-        :param done: 是否结束
-        """
-        self.memory.append((state, action, reward, next_state, done))
+        """存储所有对称状态的经验"""
+        for s, ns in zip(states, next_states):
+            self.memory.append((s, action, reward, ns, done))
 
     @timer
     def replay(self) -> None:

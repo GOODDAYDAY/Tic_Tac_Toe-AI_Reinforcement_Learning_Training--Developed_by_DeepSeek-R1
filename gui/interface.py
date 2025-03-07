@@ -152,7 +152,7 @@ class GameGUI:
         self.trainer = AITrainer(self.ai, self.n)
 
         try:
-            stats = self.trainer.train(episodes=100000)
+            stats = self.trainer.train(episodes=10000)
             messagebox.showinfo("训练完成",
                                 f"训练结果：\n胜率: {stats['wins'] / 100:.2%}\n败率: {stats['losses'] / 100:.2%}")
         except Exception as e:

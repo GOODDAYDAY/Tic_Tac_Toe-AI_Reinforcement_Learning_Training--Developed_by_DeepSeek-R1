@@ -110,8 +110,32 @@ class GameGUI:
         if self.game.make_move(row, col):
             self.update_board()
             if not self.game.game_over:
+                # 从人类移动中学习
+                self._learn_from_human_move(row, col)
                 self.is_human_turn = False
                 self._ai_move()
+
+    def _learn_from_human_move(self, row: int, col: int) -> None:
+        """从人类移动中学习"""
+        prev_state = self.ai.get_state(self.game)
+        action_index = row * self.n + col
+        next_state = self.ai.get_state(self.game)
+
+        # 动态计算即时奖励
+        instant_reward = self._calculate_instant_reward_for_human_move(row, col)
+        done = self.game.game_over
+
+        # 将经验存入AI的经验回放缓冲区
+        print(f"action_index: {action_index}, reward: {instant_reward}, done: {done}")
+        self.ai.remember(prev_state, action_index, instant_reward, next_state, done)
+
+        # 如果经验池足够大，执行一次模型更新
+        if len(self.ai.memory) >= self.ai.batch_size:
+            self.ai.replay()
+
+    def _calculate_instant_reward_for_human_move(self, row: int, col: int) -> float:
+        """计算人类玩家移动的即时奖励"""
+        return self.trainer._calculate_instant_reward(self.game, 1, row, col)
 
     def _ai_move(self) -> None:
         """执行AI移动"""
@@ -128,7 +152,7 @@ class GameGUI:
         self.trainer = AITrainer(self.ai, self.n)
 
         try:
-            stats = self.trainer.train(episodes=10000)
+            stats = self.trainer.train(episodes=100000)
             messagebox.showinfo("训练完成",
                                 f"训练结果：\n胜率: {stats['wins'] / 100:.2%}\n败率: {stats['losses'] / 100:.2%}")
         except Exception as e:

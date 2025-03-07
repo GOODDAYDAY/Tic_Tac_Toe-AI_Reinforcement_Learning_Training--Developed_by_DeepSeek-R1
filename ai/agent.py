@@ -53,7 +53,7 @@ class RLAgent:
         self.gamma = 0.99  # 折扣因子
         self.epsilon = 1.0  # 初始探索率
         self.epsilon_min = 0.1  # 最小探索率
-        self.epsilon_decay = 0.9997  # 探索率衰减
+        self.epsilon_decay = 0.997  # 探索率衰减
         self.batch_size = 128  # 批量大小
 
         # 模型文件路径
@@ -195,6 +195,7 @@ class RLAgent:
         # 衰减探索率
         if self.epsilon > self.epsilon_min:
             self.epsilon = self.epsilon * self.epsilon_decay
+        self.memory = deque(maxlen=10000)
 
     @timer
     def save_model(self) -> None:
